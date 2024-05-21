@@ -1,0 +1,28 @@
+From 02d7cdd1e78ae343294962c85b3a31a0c9d59329 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Abdullah=20=C3=96mer=20Yama=C3=A7?= <aomeryamac@gmail.com>
+Date: Wed, 1 May 2024 08:21:42 +0300
+Subject: [PATCH 08/10] delay change
+
+---
+ plugins/serial_com/USBSerialCom.cpp | 5 +++--
+ 1 file changed, 3 insertions(+), 2 deletions(-)
+
+diff --git a/plugins/serial_com/USBSerialCom.cpp b/plugins/serial_com/USBSerialCom.cpp
+index 9e19772fa..24d415d62 100644
+--- a/plugins/serial_com/USBSerialCom.cpp
++++ b/plugins/serial_com/USBSerialCom.cpp
+@@ -256,8 +256,9 @@ void USBSerialCom::loop() {
+ 			}
+ 		}
+ 
+-		// Add a delay to simulate continuous reading
+-		std::this_thread::sleep_for(std::chrono::seconds(1));
++		// Add a delay to simulate continuous reading 100ms
++
++		std::this_thread::sleep_for(std::chrono::milliseconds(50));
+ 	}
+ 	return;
+ }
+-- 
+2.34.1
+

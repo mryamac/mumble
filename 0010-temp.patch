@@ -1,0 +1,888 @@
+From 67b560024ba0404b0466637760a02648857d519f Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Abdullah=20=C3=96mer=20Yama=C3=A7?= <aomeryamac@gmail.com>
+Date: Mon, 20 May 2024 07:20:26 +0300
+Subject: [PATCH 10/10] temp
+
+---
+ .gitignore                                    |   1 +
+ plugins/CMakeLists.txt                        |   2 +-
+ plugins/agent/AgentCom.cpp                    |   8 +
+ plugins/agent/AgentCom.h                      |  31 ++
+ .../SerialCom.cpp => agent/AgentPlugin.cpp}   | 185 +++--------
+ plugins/{serial_com => agent}/CMakeLists.txt  |   5 +-
+ plugins/agent/Logger.cpp                      |  13 +
+ plugins/agent/Logger.h                        |  15 +
+ plugins/serial_com/USBSerialCom.cpp           | 299 ------------------
+ plugins/serial_com/USBSerialCom.h             |  60 ----
+ 10 files changed, 122 insertions(+), 497 deletions(-)
+ create mode 100644 plugins/agent/AgentCom.cpp
+ create mode 100644 plugins/agent/AgentCom.h
+ rename plugins/{serial_com/SerialCom.cpp => agent/AgentPlugin.cpp} (65%)
+ rename plugins/{serial_com => agent}/CMakeLists.txt (85%)
+ create mode 100644 plugins/agent/Logger.cpp
+ create mode 100644 plugins/agent/Logger.h
+ delete mode 100644 plugins/serial_com/USBSerialCom.cpp
+ delete mode 100644 plugins/serial_com/USBSerialCom.h
+
+diff --git a/.gitignore b/.gitignore
+index 397efb9a7..48b88d963 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -50,3 +50,4 @@ compile_commands.json
+ .devcontainer/*
+ __pycache__/
+ CMakeSettings.json
++staticbuild
+\ No newline at end of file
+diff --git a/plugins/CMakeLists.txt b/plugins/CMakeLists.txt
+index d98a3c74a..acdf0066d 100644
+--- a/plugins/CMakeLists.txt
++++ b/plugins/CMakeLists.txt
+@@ -28,6 +28,7 @@ endif()
+ if(WIN32 OR (UNIX AND CMAKE_SYSTEM_NAME STREQUAL "Linux"))
+ 	# Plugins available on Windows and Linux
+ 	list(APPEND AVAILABLE_PLUGINS
++		"agent"
+ 		"amongus"
+ 		"aoc"
+ 		"arma2"
+@@ -70,7 +71,6 @@ if(WIN32 OR (UNIX AND CMAKE_SYSTEM_NAME STREQUAL "Linux"))
+ 		"lotro"
+ 		"ql"
+ 		"rl"
+-		"serial_com"
+ 		"se"
+ 		"sr"
+ 		"sto"
+diff --git a/plugins/agent/AgentCom.cpp b/plugins/agent/AgentCom.cpp
+new file mode 100644
+index 000000000..64b4fae38
+--- /dev/null
++++ b/plugins/agent/AgentCom.cpp
+@@ -0,0 +1,8 @@
++#include "AgentCom.h"
++#include <QFile>
++#include <fstream>
++#include <iostream>
++#include <qstandardpaths.h>
++#include <sstream>
++#include <thread>
++#include <unordered_map>
+diff --git a/plugins/agent/AgentCom.h b/plugins/agent/AgentCom.h
+new file mode 100644
+index 000000000..51a3d64a5
+--- /dev/null
++++ b/plugins/agent/AgentCom.h
+@@ -0,0 +1,31 @@
++#ifndef MUMBLE_MUMBLE_PLUGIN_AGENT_COM_SETTINGS_H_
++#define MUMBLE_MUMBLE_PLUGIN_AGENT_COM_SETTINGS_H_
++
++
++#include <atomic> // For std::atomic<bool>
++#include <string>
++#include <thread>
++#include <vector>
++
++typedef int32_t mumble_channelid_t;
++typedef uint32_t mumble_userid_t;
++
++int setUserToChannel(mumble_channelid_t channelID);
++int linkChannels(std::vector< mumble_channelid_t > channels);
++int unlinkChannels(std::vector< mumble_channelid_t > channels);
++int startListeningToChannel(std::vector< mumble_channelid_t > channels);
++int stopListeningToChannel(std::vector< mumble_channelid_t > channels);
++int sendDataToUser(const char *userName, const char *message);
++int sendDataToUser(mumble_userid_t user, const char *message);
++int getCurrentUserName(const char **userName);
++mumble_channelid_t getCurrentChannelID();
++
++class AgentCom {
++private:
++public:
++	AgentCom(/* args */){};
++	~AgentCom(){};
++};
++
++
++#endif // MUMBLE_MUMBLE_PLUGIN_SERIAL_COM_SETTINGS_H_
+\ No newline at end of file
+diff --git a/plugins/serial_com/SerialCom.cpp b/plugins/agent/AgentPlugin.cpp
+similarity index 65%
+rename from plugins/serial_com/SerialCom.cpp
+rename to plugins/agent/AgentPlugin.cpp
+index b229be16b..2e9caeb36 100644
+--- a/plugins/serial_com/SerialCom.cpp
++++ b/plugins/agent/AgentPlugin.cpp
+@@ -6,7 +6,8 @@
+ // Include the definitions of the plugin functions
+ // Not that this will also include ../PluginComponents.h
+ #include "../MumblePlugin.h"
+-#include "USBSerialCom.h"
++#include "AgentCom.h"
++#include "Logger.h"
+ 
+ #include <cstring>
+ #include <iostream>
+@@ -15,7 +16,7 @@
+ // These are just some utility functions facilitating writing logs and the like
+ // The actual implementation of the plugin is further down
+ std::ostream &pLog() {
+-	std::cout << "SerialCom Plugin: ";
++	std::cout << "Agent Plugin: ";
+ 	return std::cout;
+ }
+ 
+@@ -37,11 +38,11 @@ std::ostream &operator<<(std::ostream &stream, const mumble_version_t version) {
+ 
+ mumble_api_t mumAPI;
+ mumble_plugin_id_t ownID;
++mumble_connection_t activeConnection;
+ 
+ /*User Defined Variables*/
+ mumble_userid_t userID;
+-mumble_connection_t activeConnection;
+-const char *dataID = "Call Plugin";
++const char *dataID = "Agent Plugin";
+ 
+ //////////////////////////////////////////////////////////////
+ //////////////////// OBLIGATORY FUNCTIONS ////////////////////
+@@ -49,20 +50,11 @@ const char *dataID = "Call Plugin";
+ // All of the following function must be implemented in order for Mumble to load the plugin
+ 
+ mumble_error_t mumble_init(uint32_t id) {
+-	pluginLog("Initialized plugin");
+-
+ 	ownID = id;
+ 
+-	// Print the connection ID at initialization. If not connected to a server it should be -1.
+-	pLog() << "Plugin ID is " << id << std::endl;
+-	try {
+-		USBSerialCom::load();
+-	} catch (const std::string &e) {
+-		mumAPI.log(ownID, e.c_str());
+-		return MUMBLE_EC_INTERNAL_ERROR;
+-	}
++	Logger::initialize();
+ 
+-	USBSerialCom::startPooling();
++	logd(LOG_INFO, "Initialized plugin id: %d", id);
+ 
+ 	// MUMBLE_STATUS_OK is a macro set to the appropriate status flag (ErrorCode)
+ 	// If you need to return any other status have a look at the ErrorCode enum
+@@ -71,15 +63,12 @@ mumble_error_t mumble_init(uint32_t id) {
+ }
+ 
+ void mumble_shutdown() {
+-	pluginLog("Shutdown plugin");
+-
+-	USBSerialCom::stopPooling();
+-
+-	mumAPI.log(ownID, "Shutdown");
++	logd(LOG_INFO, "Shutdown plugin");
++	Logger::terminate();
+ }
+ 
+ MumbleStringWrapper mumble_getName() {
+-	static const char *name = "Serial Communication Plugin";
++	static const char *name = "Agent Plugin";
+ 
+ 	MumbleStringWrapper wrapper;
+ 	wrapper.data = name;
+@@ -131,43 +120,6 @@ void mumble_releaseResource(const void *pointer) {
+ 
+ bool mumble_onReceiveData(mumble_connection_t connection, mumble_userid_t sender, const uint8_t *data,
+ 						  size_t dataLength, const char *dataID) {
+-	const char *senderName;
+-	mumble_channelid_t tempChannelID;
+-
+-	if (dataLength >= 4 && strncmp(reinterpret_cast< const char * >(data), "CALL ", 5) == 0
+-		&& USBSerialCom::getCallUser() == 0) {
+-		// Split data CALL sender channelID
+-		sscanf(reinterpret_cast< const char * >(data), "CALL %u", &tempChannelID);
+-
+-		// Get the name of the sender
+-		mumAPI.getUserName(ownID, connection, sender, &senderName);
+-
+-		USBSerialCom::setCall(sender, tempChannelID);
+-
+-		USBSerialCom::response("CALL FROM " + std::string(senderName));
+-	} else if (dataLength >= 4 && strncmp(reinterpret_cast< const char * >(data), "CALL ", 5) == 0
+-			   && USBSerialCom::getCallUser() != 0) {
+-		sendDataToUser(USBSerialCom::getCallUser(), "BUSY");
+-	} else if (dataLength >= 6 && strncmp(reinterpret_cast< const char * >(data), "ACCEPT", 6) == 0
+-			   && USBSerialCom::getCallUser() == sender) {
+-		USBSerialCom::response("ACCEPTED");
+-	} else if (dataLength >= 6 && strncmp(reinterpret_cast< const char * >(data), "REJECT", 6) == 0
+-			   && USBSerialCom::getCallUser() == sender) {
+-		USBSerialCom::response("REJECTED");
+-		USBSerialCom::endCall();
+-	} else if (dataLength >= 7 && strncmp(reinterpret_cast< const char * >(data), "ENDCALL", 6) == 0
+-			   && USBSerialCom::getCallUser() == sender) {
+-		USBSerialCom::response("ENDCALL");
+-		USBSerialCom::clearCallState();
+-	} else if (dataLength >= 4 && strncmp(reinterpret_cast< const char * >(data), "BUSY", 6) == 0) {
+-		USBSerialCom::clearCallState();
+-		USBSerialCom::response("BUSY");
+-	} else {
+-		// Get the name of the sender
+-		std::string message(reinterpret_cast< const char * >(data), dataLength);
+-		USBSerialCom::response(message);
+-	}
+-
+ 	return true;
+ }
+ 
+@@ -192,7 +144,7 @@ void mumble_onServerSynchronized(mumble_connection_t connection) {
+ mumble_version_t mumble_getVersion() {
+ 	// Mumble uses semantic versioning (see https://semver.org/)
+ 	// { major, minor, patch }
+-	return { 1, 3, 0 };
++	return { 1, 3, 1 };
+ }
+ 
+ MumbleStringWrapper mumble_getAuthor() {
+@@ -220,82 +172,55 @@ MumbleStringWrapper mumble_getDescription() {
+ 	return wrapper;
+ }
+ 
+-mumble_channelid_t getChannelID(const char *channelID) {
+-	// Get all channels from mumble-api
+-	mumble_error_t result;
+-	size_t channelCount;
+-	mumble_channelid_t *channels;
+-	result = mumAPI.getAllChannels(ownID, activeConnection, &channels, &channelCount);
+-	if (result != MUMBLE_STATUS_OK) {
+-		mumAPI.log(ownID, "Failed to get all channels");
+-		return -1;
+-	}
+-
+-	// Find the channel with the given name
+-	for (size_t i = 0; i < channelCount; i++) {
+-		const char *channelName;
+-		result = mumAPI.getChannelName(ownID, activeConnection, channels[i], &channelName);
+-		if (result != MUMBLE_STATUS_OK) {
+-			mumAPI.log(ownID, "Failed to get channel name");
+-			return -1;
+-		}
+-		if (strcmp(channelName, channelID) == 0) {
+-			return channels[i];
+-		}
+-	}
+-	mumAPI.log(ownID, "Failed to find channel");
+-	return -1;
+-}
+-
+ int setUserToChannel(mumble_channelid_t channelID) {
+ 	mumble_error_t result;
+ 
+ 	// Set the user to the given channel
+ 	result = mumAPI.requestUserMove(ownID, activeConnection, userID, channelID, NULL);
+ 	if (result != MUMBLE_STATUS_OK) {
+-		mumAPI.log(ownID, "Failed to set user to channel");
++		logd(LOG_ERR, "Failed to set user to channel result: %d", result);
+ 		return -1;
+ 	}
+ 
+ 	return 0;
+ }
+ 
+-int unlinkChannels(std::vector< mumble_channelid_t > channels) {
++int linkChannels(std::vector< mumble_channelid_t > channels) {
+ 	mumble_error_t result;
+ 	mumble_channelid_t currentChannel;
+ 
+ 	result = mumAPI.getChannelOfUser(ownID, activeConnection, userID, &currentChannel);
+ 	if (result != MUMBLE_STATUS_OK) {
+-		mumAPI.log(ownID, "Failed to get channel of user");
++		logd(LOG_ERR, "Failed to get channel of user result: %d", result);
+ 		return -1;
+ 	}
+ 
+ 	channels.push_back(currentChannel);
+-	// Unlink the channel
+-	result = mumAPI.requestUnlinkGivenChannels(ownID, activeConnection, channels.data(), channels.size());
++	// Link the channel
++	result = mumAPI.requestLinkChannels(ownID, activeConnection, channels.data(), channels.size());
+ 	if (result != MUMBLE_STATUS_OK) {
+-		mumAPI.log(ownID, "Failed to unlink channel");
++		logd(LOG_ERR, "Failed to link channels result: %d", result);
+ 		return -1;
+ 	}
+ 
+ 	return 0;
+ }
+ 
+-int linkChannels(std::vector< mumble_channelid_t > channels) {
++int unlinkChannels(std::vector< mumble_channelid_t > channels) {
+ 	mumble_error_t result;
+ 	mumble_channelid_t currentChannel;
+ 
+ 	result = mumAPI.getChannelOfUser(ownID, activeConnection, userID, &currentChannel);
+ 	if (result != MUMBLE_STATUS_OK) {
+-		mumAPI.log(ownID, "Failed to get channel of user");
++		logd(LOG_ERR, "Failed to get channel of user result: %d", result);
+ 		return -1;
+ 	}
+ 
+ 	channels.push_back(currentChannel);
+-	// Link the channel
+-	result = mumAPI.requestLinkChannels(ownID, activeConnection, channels.data(), channels.size());
++	// Unlink the channel
++	result = mumAPI.requestUnlinkGivenChannels(ownID, activeConnection, channels.data(), channels.size());
+ 	if (result != MUMBLE_STATUS_OK) {
+-		mumAPI.log(ownID, "Failed to link channel");
++		logd(LOG_ERR, "Failed to unlink channels result: %d", result);
+ 		return -1;
+ 	}
+ 
+@@ -308,7 +233,7 @@ int startListeningToChannel(std::vector< mumble_channelid_t > channels) {
+ 	// Listen to the channel
+ 	result = mumAPI.requestStartListeningToChannels(ownID, activeConnection, channels.data(), channels.size());
+ 	if (result != MUMBLE_STATUS_OK) {
+-		mumAPI.log(ownID, "Failed to listen to channel");
++		logd(LOG_ERR, "Failed to listen to channel result: %d", result);
+ 		return -1;
+ 	}
+ 
+@@ -322,37 +247,53 @@ int stopListeningToChannel(std::vector< mumble_channelid_t > channels) {
+ 	// Stop listening to the channel
+ 	result = mumAPI.requestStopListeningToChannels(ownID, activeConnection, channels.data(), channels.size());
+ 	if (result != MUMBLE_STATUS_OK) {
+-		mumAPI.log(ownID, "Failed to stop listening to channel");
++		logd(LOG_ERR, "Failed to stop listening to channel result: %d", result);
+ 		return -1;
+ 	}
+ 
+ 	return 0;
+ }
+ 
+-int createTempChannel(const char *channelName) {
++int startWhisperingToUser(const char *userName) {
+ 	mumble_error_t result;
++	size_t userCount;
++	mumble_userid_t user;
+ 
+-	// Create the channel
+-	result = mumAPI.requestCreateChannel(ownID, activeConnection, 0, channelName, NULL, 0, false, 2);
++	result = mumAPI.findUserByName(ownID, activeConnection, userName, &user);
+ 	if (result != MUMBLE_STATUS_OK) {
+-		mumAPI.log(ownID, "Failed to create channel");
++		logd(LOG_ERR, "Failed to find user result: %d", result);
+ 		return -1;
+ 	}
+ 
++	// Start whispering to the user
++	/*result = mumAPI.requestStartWhisperingToUsers(ownID, activeConnection, &user, 1);
++	if (result != MUMBLE_STATUS_OK) {
++		logd(LOG_ERR, "Failed to start whispering to user result: %d", result);
++		return -1;
++	}*/
++
+ 	return 0;
+ }
+ 
+-mumble_channelid_t getCurrentChannelID() {
++int stopWhisperingToUser(const char *userName) {
+ 	mumble_error_t result;
+-	mumble_channelid_t currentChannel;
++	size_t userCount;
++	mumble_userid_t user;
+ 
+-	result = mumAPI.getChannelOfUser(ownID, activeConnection, userID, &currentChannel);
++	result = mumAPI.findUserByName(ownID, activeConnection, userName, &user);
+ 	if (result != MUMBLE_STATUS_OK) {
+-		mumAPI.log(ownID, "Failed to get channel of user");
++		logd(LOG_ERR, "Failed to find user result: %d", result);
+ 		return -1;
+ 	}
+ 
+-	return currentChannel;
++	// Stop whispering to the user
++	/*result = mumAPI.requestStopWhisperingToUsers(ownID, activeConnection, &user, 1);
++	if (result != MUMBLE_STATUS_OK) {
++		logd(LOG_ERR, "Failed to stop whispering to user result: %d", result);
++		return -1;
++	}*/
++
++	return 0;
+ }
+ 
+ int sendDataToUser(const char *userName, const char *message) {
+@@ -362,41 +303,17 @@ int sendDataToUser(const char *userName, const char *message) {
+ 
+ 	result = mumAPI.findUserByName(ownID, activeConnection, userName, &user);
+ 	if (result != MUMBLE_STATUS_OK) {
+-		mumAPI.log(ownID, "Failed to find user");
++		logd(LOG_ERR, "Failed to find user result: %d", result);
+ 		return -1;
+ 	}
+ 	(ownID, activeConnection, user, message);
+ 	// Send the message
+ 	result = mumAPI.sendData(ownID, activeConnection, &user, 1, (const uint8_t *) message, strlen(message), dataID);
+ 	if (result != MUMBLE_STATUS_OK) {
+-		mumAPI.log(ownID, "Failed to send message to user");
++		logd(LOG_ERR, "Failed to send message to user result: %d", result);
+ 		return -1;
+ 	}
+ 
+ 	return user;
+ }
+-
+-int sendDataToUser(mumble_userid_t user, const char *message) {
+-	mumble_error_t result;
+-
+-	// Send the message
+-	result = mumAPI.sendData(ownID, activeConnection, &user, 1, (const uint8_t *) message, strlen(message), dataID);
+-	if (result != MUMBLE_STATUS_OK) {
+-		mumAPI.log(ownID, "Failed to send message to user");
+-		return -1;
+-	}
+-
+-	return 0;
+-}
+-
+-int getCurrentUserName(const char **userName) {
+-	mumble_error_t result;
+-	result = mumAPI.getUserName(ownID, activeConnection, userID, userName);
+-	if (result != MUMBLE_STATUS_OK) {
+-		mumAPI.log(ownID, "Failed to get user name");
+-		return -1;
+-	}
+-
+-	return 0;
+-}
+ //////////////////////////////////////////////////////////////
+\ No newline at end of file
+diff --git a/plugins/serial_com/CMakeLists.txt b/plugins/agent/CMakeLists.txt
+similarity index 85%
+rename from plugins/serial_com/CMakeLists.txt
+rename to plugins/agent/CMakeLists.txt
+index 4f73adadd..69cb11460 100644
+--- a/plugins/serial_com/CMakeLists.txt
++++ b/plugins/agent/CMakeLists.txt
+@@ -15,6 +15,5 @@ link_directories("/usr/lib")
+ link_directories("/usr/local/lib")
+ link_directories("/usr/lib/x86_64-linux-gnu") # Adjust this path as needed
+ 
+-
+-add_library(serial_com SHARED "SerialCom.cpp" "USBSerialCom.cpp" )
+-target_link_libraries(serial_com Qt5::Core serial)
++add_library(agent SHARED "AgentPlugin.cpp" "AgentCom.cpp" "Logger.cpp" )
++target_link_libraries(agent Qt5::Core)
+diff --git a/plugins/agent/Logger.cpp b/plugins/agent/Logger.cpp
+new file mode 100644
+index 000000000..902d479f7
+--- /dev/null
++++ b/plugins/agent/Logger.cpp
+@@ -0,0 +1,13 @@
++#include "Logger.h"
++#include <iostream>
++#include <syslog.h>
++
++void Logger::initialize() {
++	// Initialize the logger
++	openlog("Plugin", LOG_CONS | LOG_NDELAY | LOG_PID, LOG_USER);
++}
++
++void Logger::terminate() {
++	// Terminate the logger
++	closelog();
++}
+diff --git a/plugins/agent/Logger.h b/plugins/agent/Logger.h
+new file mode 100644
+index 000000000..0d190e060
+--- /dev/null
++++ b/plugins/agent/Logger.h
+@@ -0,0 +1,15 @@
++#pragma once
++
++#include <string>
++#include <syslog.h>
++
++const std::string level_prefix[] = { "", "", "FATAL", "ERROR", "WARN", "", "INFO", "DEBUG" };
++
++#define logd(level, format, ...) \
++	syslog(level | LOG_USER, "%s %s:%d " format, level_prefix[level].c_str(), __FILE__, __LINE__, ##__VA_ARGS__);
++
++class Logger {
++public:
++	static void initialize();
++	static void terminate();
++};
+\ No newline at end of file
+diff --git a/plugins/serial_com/USBSerialCom.cpp b/plugins/serial_com/USBSerialCom.cpp
+deleted file mode 100644
+index 18d3bc8d5..000000000
+--- a/plugins/serial_com/USBSerialCom.cpp
++++ /dev/null
+@@ -1,299 +0,0 @@
+-#include "USBSerialCom.h"
+-#include <QFile>
+-#include <fstream>
+-#include <iostream>
+-#include <qstandardpaths.h>
+-#include <sstream>
+-#include <thread>
+-#include <unordered_map>
+-
+-std::atomic< bool > USBSerialCom::shouldStop;
+-std::thread USBSerialCom::myThread;
+-std::string USBSerialCom::devPath          = "";
+-unsigned int USBSerialCom::baudRate        = 0;
+-mumble_channelid_t USBSerialCom::channelID = 0;
+-const char *USBSerialCom::userName;
+-mumble_userid_t USBSerialCom::callUserID       = 0;
+-mumble_channelid_t USBSerialCom::callChannelID = 0;
+-LibSerial::SerialStream USBSerialCom::serialStream;
+-
+-void USBSerialCom::load() {
+-	std::string settingsPath = findSettingsLocation(false);
+-
+-	std::ifstream stream(settingsPath);
+-
+-	// Check if the file is open
+-	if (!stream.is_open()) {
+-		throw std::string("Could not open settings file" + settingsPath);
+-	}
+-
+-	// Container to store key-value pairs
+-	std::unordered_map< std::string, std::string > keyValuePairs;
+-
+-	// Read and parse each line from the file
+-	std::string line;
+-	while (std::getline(stream, line)) {
+-		std::istringstream iss(line);
+-		std::string key, value;
+-		if (std::getline(iss, key, '=') && std::getline(iss, value)) {
+-			// Trim leading and trailing whitespaces from key and value
+-			key.erase(0, key.find_first_not_of(" \t\n\r\f\v"));
+-			key.erase(key.find_last_not_of(" \t\n\r\f\v") + 1);
+-			value.erase(0, value.find_first_not_of(" \t\n\r\f\v"));
+-			value.erase(value.find_last_not_of(" \t\n\r\f\v") + 1);
+-
+-			// Insert key-value pair into the map
+-			keyValuePairs[key] = value;
+-		}
+-	}
+-
+-	devPath   = keyValuePairs["devPath"];
+-	baudRate  = std::stoul(keyValuePairs["baudRate"].c_str());
+-	channelID = std::stoul(keyValuePairs["channelID"].c_str());
+-
+-	stream.close();
+-}
+-
+-std::string USBSerialCom::findSettingsLocation(bool legacy) {
+-	QString path = QStandardPaths::writableLocation(QStandardPaths::ConfigLocation);
+-	QFile settingsFile(QString::fromLatin1("%1/%2").arg(path).arg(QLatin1String("Mumble/settings.ini")));
+-
+-	return settingsFile.fileName().toStdString();
+-}
+-
+-void USBSerialCom::startPooling() {
+-	// Start pooling the serial port
+-	shouldStop.store(false);
+-	serialStream.Open(devPath.c_str());
+-	LibSerial::BaudRate baudRateEnum = LibSerial::BaudRate::BAUD_9600;
+-	switch (baudRate) {
+-		case 9600:
+-			baudRateEnum = LibSerial::BaudRate::BAUD_9600;
+-			break;
+-		case 19200:
+-			baudRateEnum = LibSerial::BaudRate::BAUD_19200;
+-			break;
+-		case 38400:
+-			baudRateEnum = LibSerial::BaudRate::BAUD_38400;
+-			break;
+-		case 57600:
+-			baudRateEnum = LibSerial::BaudRate::BAUD_57600;
+-			break;
+-		case 115200:
+-			baudRateEnum = LibSerial::BaudRate::BAUD_115200;
+-			break;
+-		default:
+-			// Do something else
+-			break;
+-	}
+-	serialStream.SetBaudRate(LibSerial::BaudRate::BAUD_115200);
+-	myThread = std::thread(loop);
+-}
+-
+-void USBSerialCom::stopPooling() {
+-	// Stop pooling the serial port
+-	shouldStop.store(true);
+-	if (myThread.joinable()) {
+-		myThread.join();
+-	}
+-	serialStream.Close();
+-}
+-
+-int USBSerialCom::sendMessageToUser(const char *userName, const char *message) {
+-	int result;
+-	// Send a message to the user
+-	result = sendDataToUser(userName, message);
+-	if (result == -1)
+-		return -1;
+-	return 0;
+-}
+-
+-int USBSerialCom::callToUser(const char *user) {
+-	int result;
+-	int nb_tries = 5;
+-	mumble_channelid_t currentChannel;
+-	std::string channelName;
+-	mumble_channelid_t callChannelID;
+-	std::string message;
+-
+-	// Check if the user is already in a call
+-	if (callUserID != 0) {
+-		response("ALREADY IN A CALL");
+-		return -1;
+-	}
+-
+-	// Set the user to the call channel
+-	if (userName == nullptr) {
+-		result = getCurrentUserName(&userName);
+-		if (result == -1)
+-			return -1;
+-	}
+-	currentChannel = getCurrentChannelID();
+-	if (currentChannel == -1)
+-		return -1;
+-	channelName = "Call-" + std::string(userName) + "-" + std::string(user);
+-	result      = createTempChannel(channelName.c_str());
+-	if (result == -1)
+-		return -1;
+-	while (getCurrentChannelID() == currentChannel && nb_tries > 0) {
+-		std::this_thread::sleep_for(std::chrono::seconds(1));
+-		nb_tries--;
+-	}
+-	if (currentChannel == getCurrentChannelID())
+-		return -1;
+-
+-	// Get the call channel ID
+-	callChannelID = getCurrentChannelID();
+-	if (callChannelID == -1)
+-		return -1;
+-
+-	// Send a message to the user
+-	message = "CALL " + std::to_string(callChannelID);
+-	result  = sendDataToUser(user, message.c_str());
+-	if (result == -1)
+-		return -1;
+-
+-	callUserID = result;
+-	startListeningToChannel({ channelID });
+-
+-	return 0;
+-}
+-
+-void USBSerialCom::endCall() {
+-	// Remove the call channel
+-	if (callChannelID == 0)
+-		return;
+-
+-	std::string message = "ENDCALL";
+-	sendDataToUser(callUserID, message.c_str());
+-	clearCallState();
+-}
+-
+-int USBSerialCom::acceptCall() {
+-	// Accept the call
+-	if (callUserID == 0)
+-		return -1;
+-
+-	setUserToChannel(callChannelID);
+-	startListeningToChannel({ channelID });
+-	sendDataToUser(callUserID, "ACCEPT");
+-	return 0;
+-}
+-
+-int USBSerialCom::rejectCall() {
+-	sendDataToUser(callUserID, "REJECT");
+-	clearCallState();
+-	return 0;
+-}
+-
+-void USBSerialCom::clearCallState() {
+-	callUserID    = 0;
+-	callChannelID = 0;
+-	setUserToChannel(channelID);
+-	stopListeningToChannel({ channelID });
+-}
+-
+-void USBSerialCom::loop() {
+-	// This is the function that will be called in a separate thread
+-	// It will pool the serial port for new data
+-
+-	while (!shouldStop.load()) {
+-		// Read data from the serial port
+-		std::string data;
+-		int result;
+-		std::getline(serialStream, data);
+-		// std::getline(std::cin, data);
+-
+-		// Process the read data
+-		if (!data.empty()) {
+-			std::istringstream iss(data);
+-			std::vector< mumble_channelid_t > tokens; // Vector to store each token
+-			std::string token;
+-			std::string command;
+-
+-			iss >> command; // Read the first token as the command
+-
+-			if (command.empty())
+-				continue;
+-
+-			if (strcmp(command.c_str(), "CHANNEL") == 0) {
+-				iss >> token;
+-				if (!token.empty())
+-					setUserToChannel(std::stoi(token));
+-			} else if (strcmp(command.c_str(), "LINK") == 0) {
+-				while (iss >> token)
+-					tokens.push_back(std::stoi(token));
+-				if (tokens.size() < 1)
+-					continue;
+-				linkChannels(tokens);
+-			} else if (strcmp(command.c_str(), "UNLINK") == 0) {
+-				while (iss >> token)
+-					tokens.push_back(std::stoi(token));
+-				if (tokens.size() < 1)
+-					continue;
+-				unlinkChannels(tokens);
+-			} else if (strcmp(command.c_str(), "LISTEN") == 0) {
+-				while (iss >> token)
+-					tokens.push_back(std::stoi(token));
+-				if (tokens.size() < 1)
+-					continue;
+-				startListeningToChannel(tokens);
+-			} else if (strcmp(command.c_str(), "NLISTEN") == 0) {
+-				while (iss >> token)
+-					tokens.push_back(std::stoi(token));
+-				if (tokens.size() < 1)
+-					continue;
+-				stopListeningToChannel(tokens);
+-			} else if (strcmp(command.c_str(), "CALL") == 0) {
+-				iss >> token;
+-				if (token.empty())
+-					continue;
+-
+-				result = callToUser(token.c_str());
+-				if (result == -1) {
+-					response("CALL FAILED");
+-					clearCallState();
+-				}
+-			} else if (strcmp(command.c_str(), "SEND") == 0) {
+-				std::string user, message;
+-				iss >> user;
+-				iss >> message;
+-				if (user.empty() || message.empty())
+-					continue;
+-				result = sendMessageToUser(user.c_str(), message.c_str());
+-				if (result == -1) {
+-					response("SEND FAILED");
+-				}
+-			} else if (strcmp(command.c_str(), "ENDCALL") == 0) {
+-				endCall();
+-			} else if (strcmp(command.c_str(), "ACCEPT") == 0) {
+-				acceptCall();
+-			} else if (strcmp(command.c_str(), "REJECT") == 0) {
+-				rejectCall();
+-			} else {
+-				// Do something else
+-			}
+-		}
+-
+-		// Add a delay to simulate continuous reading 100ms
+-
+-		std::this_thread::sleep_for(std::chrono::milliseconds(50));
+-	}
+-	return;
+-}
+-
+-void USBSerialCom::response(std::string message) {
+-	// Send a response to the serial port
+-	serialStream << message;
+-	// std::cout << message << std::endl;
+-}
+-
+-mumble_userid_t USBSerialCom::getCallUser() {
+-	return callUserID;
+-}
+-
+-void USBSerialCom::setCall(mumble_userid_t user, mumble_channelid_t channelID) {
+-	// Set the last call
+-	callUserID    = user;
+-	callChannelID = channelID;
+-}
+\ No newline at end of file
+diff --git a/plugins/serial_com/USBSerialCom.h b/plugins/serial_com/USBSerialCom.h
+deleted file mode 100644
+index 924564f29..000000000
+--- a/plugins/serial_com/USBSerialCom.h
++++ /dev/null
+@@ -1,60 +0,0 @@
+-#ifndef MUMBLE_MUMBLE_PLUGIN_SERIAL_COM_SETTINGS_H_
+-#define MUMBLE_MUMBLE_PLUGIN_SERIAL_COM_SETTINGS_H_
+-
+-#include <SerialStream.h>
+-#include <atomic> // For std::atomic<bool>
+-#include <string>
+-#include <thread>
+-#include <vector>
+-
+-typedef int32_t mumble_channelid_t;
+-typedef uint32_t mumble_userid_t;
+-
+-mumble_channelid_t getChannelID(const char *channelID);
+-int setUserToChannel(mumble_channelid_t channelID);
+-int linkChannels(std::vector< mumble_channelid_t > channels);
+-int unlinkChannels(std::vector< mumble_channelid_t > channels);
+-int startListeningToChannel(std::vector< mumble_channelid_t > channels);
+-int stopListeningToChannel(std::vector< mumble_channelid_t > channels);
+-int createTempChannel(const char *channelName);
+-int sendDataToUser(const char *userName, const char *message);
+-int sendDataToUser(mumble_userid_t user, const char *message);
+-int getCurrentUserName(const char **userName);
+-mumble_channelid_t getCurrentChannelID();
+-
+-class USBSerialCom {
+-private:
+-	static LibSerial::SerialStream serialStream;
+-	static std::atomic< bool > shouldStop;
+-	static std::thread myThread;
+-	static std::string devPath;
+-	static unsigned int baudRate;
+-	static mumble_channelid_t channelID;
+-	const static char *userName;
+-	static mumble_userid_t callUserID;
+-	static mumble_channelid_t callChannelID;
+-	static std::string findSettingsLocation(bool legacy);
+-	static void loop();
+-
+-public:
+-	USBSerialCom(/* args */){};
+-	~USBSerialCom(){};
+-
+-	static void load();
+-	static void startPooling();
+-	static void stopPooling();
+-	static void response(std::string message);
+-
+-	static mumble_userid_t getCallUser();
+-	static void setCall(mumble_userid_t user, mumble_channelid_t channelID);
+-
+-	static void clearCallState();
+-	static int callToUser(const char *userName);
+-	static int sendMessageToUser(const char *userName, const char *message);
+-	static void endCall();
+-	static int acceptCall();
+-	static int rejectCall();
+-};
+-
+-
+-#endif // MUMBLE_MUMBLE_PLUGIN_SERIAL_COM_SETTINGS_H_
+\ No newline at end of file
+-- 
+2.34.1
+

@@ -1,0 +1,123 @@
+From 56380049a09837a1dc2ce3d9ef55f8e792feae2e Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Abdullah=20=C3=96mer=20Yama=C3=A7?= <aomeryamac@gmail.com>
+Date: Mon, 13 May 2024 20:26:01 +0300
+Subject: [PATCH 09/10] send message
+
+---
+ plugins/serial_com/SerialCom.cpp    |  5 ++++-
+ plugins/serial_com/USBSerialCom.cpp | 27 +++++++++++++++++++++++----
+ plugins/serial_com/USBSerialCom.h   |  3 ++-
+ 3 files changed, 29 insertions(+), 6 deletions(-)
+
+diff --git a/plugins/serial_com/SerialCom.cpp b/plugins/serial_com/SerialCom.cpp
+index 9d521a9a4..b229be16b 100644
+--- a/plugins/serial_com/SerialCom.cpp
++++ b/plugins/serial_com/SerialCom.cpp
+@@ -162,9 +162,12 @@ bool mumble_onReceiveData(mumble_connection_t connection, mumble_userid_t sender
+ 	} else if (dataLength >= 4 && strncmp(reinterpret_cast< const char * >(data), "BUSY", 6) == 0) {
+ 		USBSerialCom::clearCallState();
+ 		USBSerialCom::response("BUSY");
++	} else {
++		// Get the name of the sender
++		std::string message(reinterpret_cast< const char * >(data), dataLength);
++		USBSerialCom::response(message);
+ 	}
+ 
+-
+ 	return true;
+ }
+ 
+diff --git a/plugins/serial_com/USBSerialCom.cpp b/plugins/serial_com/USBSerialCom.cpp
+index 24d415d62..18d3bc8d5 100644
+--- a/plugins/serial_com/USBSerialCom.cpp
++++ b/plugins/serial_com/USBSerialCom.cpp
+@@ -99,6 +99,15 @@ void USBSerialCom::stopPooling() {
+ 	serialStream.Close();
+ }
+ 
++int USBSerialCom::sendMessageToUser(const char *userName, const char *message) {
++	int result;
++	// Send a message to the user
++	result = sendDataToUser(userName, message);
++	if (result == -1)
++		return -1;
++	return 0;
++}
++
+ int USBSerialCom::callToUser(const char *user) {
+ 	int result;
+ 	int nb_tries = 5;
+@@ -152,7 +161,7 @@ int USBSerialCom::callToUser(const char *user) {
+ 
+ void USBSerialCom::endCall() {
+ 	// Remove the call channel
+-	if(callChannelID == 0)
++	if (callChannelID == 0)
+ 		return;
+ 
+ 	std::string message = "ENDCALL";
+@@ -192,8 +201,8 @@ void USBSerialCom::loop() {
+ 		// Read data from the serial port
+ 		std::string data;
+ 		int result;
+-		 std::getline(serialStream, data);
+-		//std::getline(std::cin, data);
++		std::getline(serialStream, data);
++		// std::getline(std::cin, data);
+ 
+ 		// Process the read data
+ 		if (!data.empty()) {
+@@ -245,6 +254,16 @@ void USBSerialCom::loop() {
+ 					response("CALL FAILED");
+ 					clearCallState();
+ 				}
++			} else if (strcmp(command.c_str(), "SEND") == 0) {
++				std::string user, message;
++				iss >> user;
++				iss >> message;
++				if (user.empty() || message.empty())
++					continue;
++				result = sendMessageToUser(user.c_str(), message.c_str());
++				if (result == -1) {
++					response("SEND FAILED");
++				}
+ 			} else if (strcmp(command.c_str(), "ENDCALL") == 0) {
+ 				endCall();
+ 			} else if (strcmp(command.c_str(), "ACCEPT") == 0) {
+@@ -265,7 +284,7 @@ void USBSerialCom::loop() {
+ 
+ void USBSerialCom::response(std::string message) {
+ 	// Send a response to the serial port
+-	 serialStream << message;
++	serialStream << message;
+ 	// std::cout << message << std::endl;
+ }
+ 
+diff --git a/plugins/serial_com/USBSerialCom.h b/plugins/serial_com/USBSerialCom.h
+index 0170f30bb..924564f29 100644
+--- a/plugins/serial_com/USBSerialCom.h
++++ b/plugins/serial_com/USBSerialCom.h
+@@ -1,11 +1,11 @@
+ #ifndef MUMBLE_MUMBLE_PLUGIN_SERIAL_COM_SETTINGS_H_
+ #define MUMBLE_MUMBLE_PLUGIN_SERIAL_COM_SETTINGS_H_
+ 
++#include <SerialStream.h>
+ #include <atomic> // For std::atomic<bool>
+ #include <string>
+ #include <thread>
+ #include <vector>
+-#include <SerialStream.h>
+ 
+ typedef int32_t mumble_channelid_t;
+ typedef uint32_t mumble_userid_t;
+@@ -50,6 +50,7 @@ public:
+ 
+ 	static void clearCallState();
+ 	static int callToUser(const char *userName);
++	static int sendMessageToUser(const char *userName, const char *message);
+ 	static void endCall();
+ 	static int acceptCall();
+ 	static int rejectCall();
+-- 
+2.34.1
+

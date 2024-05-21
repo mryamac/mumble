@@ -1,0 +1,24 @@
+From b38670876ee6012a7576a48b25e1bc2f824e3b03 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Abdullah=20=C3=96mer=20Yama=C3=A7?= <aomeryamac@gmail.com>
+Date: Wed, 17 Apr 2024 07:28:02 +0300
+Subject: [PATCH 07/10] open fix
+
+---
+ plugins/serial_com/USBSerialCom.cpp | 1 -
+ 1 file changed, 1 deletion(-)
+
+diff --git a/plugins/serial_com/USBSerialCom.cpp b/plugins/serial_com/USBSerialCom.cpp
+index b9611f1c3..9e19772fa 100644
+--- a/plugins/serial_com/USBSerialCom.cpp
++++ b/plugins/serial_com/USBSerialCom.cpp
+@@ -188,7 +188,6 @@ void USBSerialCom::loop() {
+ 	// This is the function that will be called in a separate thread
+ 	// It will pool the serial port for new data
+ 
+-serialStream.Open(devPath.c_str());
+ 	while (!shouldStop.load()) {
+ 		// Read data from the serial port
+ 		std::string data;
+-- 
+2.34.1
+
