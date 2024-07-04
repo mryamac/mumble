@@ -13,6 +13,7 @@ Agent::~Agent() {
 
 void Agent::initialize() {
 	// Set Ready state
+	this->shutdown = false;
 	this->socket->bind(this->defaultConfig.getMumbleConnectionString());
 }
 

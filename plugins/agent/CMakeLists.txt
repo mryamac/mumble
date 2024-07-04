@@ -3,8 +3,6 @@
 # that can be found in the LICENSE file at the root of the
 # Mumble source tree or at <https://www.mumble.info/LICENSE>.
 
-# Find the QtCore module
-find_package(Qt5 COMPONENTS Core REQUIRED)
 find_package(PkgConfig REQUIRED)
 find_package(Protobuf REQUIRED)
 
@@ -21,4 +19,4 @@ link_directories(${PC_CZMQ_LIBRARY_DIRS})
 
 
 add_library(agent SHARED "AgentPlugin.cpp" "Agent.cpp" "Config.cpp" "Logger.cpp" "mumble.pb.cc")
-target_link_libraries(agent Qt5::Core ${PC_CZMQ_LIBRARIES} ${Protobuf_LIBRARIES})
+target_link_libraries(agent ${PC_CZMQ_LIBRARIES} ${Protobuf_LIBRARIES})
