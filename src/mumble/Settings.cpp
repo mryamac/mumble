@@ -236,27 +236,7 @@ void Settings::load(const QString &path) {
 			// These settings were saved without Mumble quitting normally afterwards. In order to prevent loading
 			// settings that are causing crashes, we check if we can load the backup instead.
 			if (!path.endsWith(QLatin1String(BACKUP_FILE_EXTENSION))) {
-				QString backupPath = path + BACKUP_FILE_EXTENSION;
-
-				QFileInfo backupInfo(backupPath);
-				if (backupInfo.exists() && backupInfo.isFile()) {
-					QMessageBox msgBox;
-					msgBox.setWindowTitle(QObject::tr("Potentially broken settings"));
-					msgBox.setText(QObject::tr("Load backup settings?"));
-					msgBox.setInformativeText(QObject::tr(
-						"It seems that Mumble did not perform a normal shutdown. If you did not intentionally kill the "
-						"application, this could mean that the used settings caused a crash. "
-						"Do you want to load the setting's backup instead?"));
-					msgBox.setStandardButtons(QMessageBox::Yes | QMessageBox::No);
-					msgBox.setDefaultButton(QMessageBox::No);
-					msgBox.setIcon(QMessageBox::Question);
-
-					if (msgBox.exec() == QMessageBox::Yes) {
-						// Load the backup instead
-						qWarning() << "Loading backup settings from" << backupPath;
-						load(backupPath);
-					}
-				}
+				// Skip loading the backup if we are already loading it
 			} else {
 				// This is already the backup we are loading
 				QMessageBox msgBox;
